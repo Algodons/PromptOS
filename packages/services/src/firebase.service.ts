@@ -1,15 +1,16 @@
 import * as admin from "firebase-admin";
-import { getApps, initializeApp, cert } from "firebase-admin/app";
+import { type App, getApps, initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, Firestore, FieldValue } from "firebase-admin/firestore";
 import { getDatabase, Database } from "firebase-admin/database";
 import { getAuth, Auth } from "firebase-admin/auth";
 
-let adminApp: admin.app.App | null = null;
+let adminApp: App | null = null;
 
-function getAdminApp(): admin.app.App {
+function getAdminApp(): App {
   if (adminApp) return adminApp;
-  if (getApps().length > 0) {
-    adminApp = getApps()[0] as admin.app.App;
+  const existing = getApps()[0];
+  if (existing) {
+    adminApp = existing;
     return adminApp;
   }
 

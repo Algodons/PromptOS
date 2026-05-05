@@ -130,12 +130,13 @@ export class PluginEngine {
     hook: keyof PluginInstallation["manifest"]["hooks"],
     payload: Record<string, unknown>
   ): Promise<PluginExecutionResult[]> {
+    const hookStr = hook as string;
     const userInstallations = Array.from(this.installations.entries())
       .filter(([key, inst]) => key.startsWith(`${userId}:`) && inst.enabled && inst.manifest.hooks[hook])
       .map(([, inst]) => inst);
 
     return Promise.all(
-      userInstallations.map((inst) => this.executeHook(inst, hook, payload))
+      userInstallations.map((inst) => this.executeHook(inst, hookStr, payload))
     );
   }
 

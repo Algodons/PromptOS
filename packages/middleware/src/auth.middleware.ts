@@ -1,10 +1,10 @@
-import jwt from "jsonwebtoken";
+import jwt, { type SignOptions } from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import { type NextRequest, NextResponse } from "next/server";
-import { JWTPayloadSchema, type JWTPayload, Role, SubscriptionTier } from "@promptos/contracts";
+import { JWTPayloadSchema, type JWTPayload } from "@promptos/contracts";
 
 const JWT_SECRET = process.env["JWT_SECRET"] ?? "";
-const JWT_EXPIRES_IN = process.env["JWT_EXPIRES_IN"] ?? "7d";
+const JWT_EXPIRES_IN = (process.env["JWT_EXPIRES_IN"] ?? "7d") as SignOptions["expiresIn"];
 
 export function signToken(payload: Omit<JWTPayload, "iat" | "exp" | "jti">): string {
   return jwt.sign({ ...payload, jti: uuidv4() }, JWT_SECRET, {

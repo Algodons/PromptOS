@@ -1,8 +1,6 @@
 "use client";
-import React from "react";
 import { clsx } from "clsx";
 import { GlassCard } from "./GlassCard.js";
-import { NeonButton } from "./NeonButton.js";
 
 interface PromptCardProps {
   id: string;

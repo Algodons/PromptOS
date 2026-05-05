@@ -4,7 +4,7 @@ import { stripeService, firebaseService } from "@promptos/services";
 import type { JWTPayload } from "@promptos/contracts";
 
 export const POST = withAuth(
-  async (req: NextRequest, user: JWTPayload): Promise<NextResponse> => {
+  async (_req: NextRequest, user: JWTPayload): Promise<NextResponse> => {
     const userData = await firebaseService.getDocument<{ stripeCustomerId?: string }>(
       "users",
       user.sub

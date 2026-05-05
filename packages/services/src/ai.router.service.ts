@@ -113,7 +113,7 @@ export class AIRouterService {
 
   private async callAnthropic(request: AIRequest, start: number): Promise<AIResponse> {
     const messages: Anthropic.Messages.MessageParam[] = request.messages.map((m) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
+      role: m.role === "assistant" ? "assistant" as const : "user" as const,
       content: m.content,
     }));
 
