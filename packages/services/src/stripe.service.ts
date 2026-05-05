@@ -1,23 +1,25 @@
 import Stripe from "stripe";
-import { z } from "zod";
 import {
   SubscriptionTier,
   BillingInterval,
-  type Subscription,
   type CreateCheckoutSessionInput,
   TierLimits,
 } from "@promptos/contracts";
 
-const stripe = new Stripe(process.env["STRIPE_SECRET_KEY"] ?? "", {
-  apiVersion: "2024-06-20",
-  typescript: true,
-});
+function createStripeClient(): Stripe {
+  const key = process.env["STRIPE_SECRET_KEY"];
+  if (!key) throw new Error("STRIPE_SECRET_KEY environment variable is required");
+  return new Stripe(key, { apiVersion: "2024-06-20", typescript: true });
+}
+
+let _stripe: Stripe | null = null;
+function getStripe(): Stripe {
+  if (!_stripe) _stripe = createStripeClient();
+  return _stripe;
+}
 
 const PriceMap: Record<SubscriptionTier, Record<BillingInterval, string>> = {
-  [SubscriptionTier.FREE]: {
-    monthly: "",
-    yearly: "",
-  },
+  [SubscriptionTier.FREE]: { monthly: "", yearly: "" },
   [SubscriptionTier.PRO]: {
     monthly: process.env["STRIPE_PRICE_PRO_MONTHLY"] ?? "",
     yearly: process.env["STRIPE_PRICE_PRO_YEARLY"] ?? "",
@@ -30,10 +32,7 @@ const PriceMap: Record<SubscriptionTier, Record<BillingInterval, string>> = {
 
 export class StripeService {
   async createCustomer(userId: string, email: string): Promise<string> {
-    const customer = await stripe.customers.create({
-      email,
-      metadata: { userId },
-    });
+    const customer = await getStripe().customers.create({ email, metadata: { userId } });
     return customer.id;
   }
 
@@ -45,7 +44,7 @@ export class StripeService {
     const priceId = PriceMap[input.tier][input.interval];
     if (!priceId) throw new Error(`No price configured for ${input.tier} ${input.interval}`);
 
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       customer: customerId,
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
@@ -60,7 +59,7 @@ export class StripeService {
   }
 
   async createPortalSession(customerId: string, returnUrl: string): Promise<string> {
-    const session = await stripe.billingPortal.sessions.create({
+    const session = await getStripe().billingPortal.sessions.create({
       customer: customerId,
       return_url: returnUrl,
     });
@@ -68,24 +67,21 @@ export class StripeService {
   }
 
   async cancelSubscription(subscriptionId: string): Promise<void> {
-    await stripe.subscriptions.update(subscriptionId, {
-      cancel_at_period_end: true,
-    });
+    await getStripe().subscriptions.update(subscriptionId, { cancel_at_period_end: true });
   }
 
   async reactivateSubscription(subscriptionId: string): Promise<void> {
-    await stripe.subscriptions.update(subscriptionId, {
-      cancel_at_period_end: false,
-    });
+    await getStripe().subscriptions.update(subscriptionId, { cancel_at_period_end: false });
   }
 
   async getSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
-    return stripe.subscriptions.retrieve(subscriptionId);
+    return getStripe().subscriptions.retrieve(subscriptionId);
   }
 
   async constructWebhookEvent(payload: string | Buffer, sig: string): Promise<Stripe.Event> {
-    const webhookSecret = process.env["STRIPE_WEBHOOK_SECRET"] ?? "";
-    return stripe.webhooks.constructEvent(payload, sig, webhookSecret);
+    const webhookSecret = process.env["STRIPE_WEBHOOK_SECRET"];
+    if (!webhookSecret) throw new Error("STRIPE_WEBHOOK_SECRET environment variable is required");
+    return getStripe().webhooks.constructEvent(payload, sig, webhookSecret);
   }
 
   async handleWebhookEvent(event: Stripe.Event): Promise<WebhookResult> {
@@ -141,7 +137,7 @@ export class StripeService {
     return SubscriptionTier.FREE;
   }
 
-  async getRateLimitForTier(tier: SubscriptionTier): Promise<{ requests: number; windowSeconds: number }> {
+  getRateLimitForTier(tier: SubscriptionTier): { requests: number; windowSeconds: number } {
     return TierLimits[tier].rateLimit;
   }
 }
