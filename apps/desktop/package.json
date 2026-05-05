@@ -3,14 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "description": "PromptOS Desktop Application",
-  "main": "src/main.js",
+  "main": "dist/main.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:next\" \"wait-on http://localhost:3000 && electron .\"",
     "dev:next": "cd ../web && next dev",
-    "build": "electron-builder --publish=never",
-    "build:mac": "electron-builder --mac --publish=never",
-    "build:win": "electron-builder --win --publish=never",
-    "build:linux": "electron-builder --linux --publish=never",
+    "compile": "tsc --outDir dist",
+    "build": "pnpm compile && electron-builder --publish=never",
+    "build:mac": "pnpm compile && electron-builder --mac --publish=never",
+    "build:win": "pnpm compile && electron-builder --win --publish=never",
+    "build:linux": "pnpm compile && electron-builder --linux --publish=never",
     "type-check": "tsc --noEmit",
     "lint": "eslint src/"
   },
@@ -31,7 +32,7 @@
       "buildResources": "assets",
       "output": "dist"
     },
-    "files": ["src/**/*", "assets/**/*"],
+    "files": ["dist/**/*", "assets/**/*"],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "assets/icon.icns",
