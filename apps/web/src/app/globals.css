@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --neon-cyan: #00F5FF;
+    --electric-purple: #A855F7;
+    --deep-space: #05060A;
+    --neon-green: #00FF88;
+  }
+
+  * {
+    border-color: rgba(0, 245, 255, 0.1);
+  }
+
+  ::selection {
+    background-color: rgba(0, 245, 255, 0.2);
+    color: #fff;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 245, 255, 0.3);
+    border-radius: 2px;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply backdrop-blur-[12px] bg-[linear-gradient(135deg,rgba(255,255,255,0.07)_0%,rgba(255,255,255,0.02)_100%)];
+    @apply border border-[rgba(0,245,255,0.2)];
+    @apply shadow-[0_8px_32px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.1)];
+  }
+
+  .neon-text-cyan {
+    text-shadow: 0 0 10px #00F5FF, 0 0 20px #00F5FF;
+  }
+
+  .neon-text-purple {
+    text-shadow: 0 0 10px #A855F7, 0 0 20px #A855F7;
+  }
+}

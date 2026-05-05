@@ -1,0 +1,39 @@
+{
+  "name": "@promptos/middleware",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch"
+  },
+  "dependencies": {
+    "@promptos/contracts": "workspace:*",
+    "@promptos/services": "workspace:*",
+    "jsonwebtoken": "^9.0.2",
+    "zod": "^3.23.8",
+    "uuid": "^10.0.0",
+    "@upstash/ratelimit": "^2.0.1",
+    "@upstash/redis": "^1.31.5"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/uuid": "^10.0.0",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5"
+  },
+  "peerDependencies": {
+    "next": "^14.0.0"
+  }
+}
