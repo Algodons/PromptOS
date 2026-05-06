@@ -1,0 +1,39 @@
+{
+  "name": "@promptos/services",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch"
+  },
+  "dependencies": {
+    "@promptos/contracts": "workspace:*",
+    "stripe": "^16.2.0",
+    "firebase-admin": "^12.2.0",
+    "firebase": "^10.12.2",
+    "openai": "^4.52.0",
+    "@anthropic-ai/sdk": "^0.24.3",
+    "@google/generative-ai": "^0.15.0",
+    "zod": "^3.23.8",
+    "uuid": "^10.0.0",
+    "crypto-js": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/uuid": "^10.0.0",
+    "@types/crypto-js": "^4.2.2",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5"
+  }
+}
