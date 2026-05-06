@@ -13,10 +13,11 @@ export const GET = withAuth(
     const tier = (subData?.tier as SubscriptionTier) ?? SubscriptionTier.FREE;
 
     const periodKey = getPeriodKey();
+    // Use a flat document key to keep collection/doc path segments odd (Firestore requirement)
     const usageData = await firebaseService.getDocument<{
       tokensUsed?: number;
       promptsUsed?: number;
-    }>(`usage/${user.sub}`, periodKey);
+    }>("usage", `${user.sub}_${periodKey}`);
 
     const limits = TierLimits[tier];
     const tokensUsed = usageData?.tokensUsed ?? 0;

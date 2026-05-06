@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { clsx } from "clsx";
 
 interface AICommandBarProps {
@@ -25,6 +25,13 @@ export function AICommandBar({
   const [focused, setFocused] = useState(false);
   const [model, setModel] = useState(selectedModel ?? models[0] ?? "gpt-4o-mini");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Keep internal model state in sync when the controlled prop changes
+  useEffect(() => {
+    if (selectedModel !== undefined) {
+      setModel(selectedModel);
+    }
+  }, [selectedModel]);
 
   const handleSubmit = useCallback(async () => {
     if (!value.trim() || loading || disabled) return;

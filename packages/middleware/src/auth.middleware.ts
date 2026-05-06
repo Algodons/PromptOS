@@ -6,15 +6,24 @@ import { JWTPayloadSchema, type JWTPayload } from "@promptos/contracts";
 const JWT_SECRET = process.env["JWT_SECRET"] ?? "";
 const JWT_EXPIRES_IN = (process.env["JWT_EXPIRES_IN"] ?? "7d") as SignOptions["expiresIn"];
 
+function requireJwtSecret(): string {
+  if (!JWT_SECRET) {
+    throw new Error(
+      "JWT_SECRET environment variable is not set. Set it to a secure random string before starting the server."
+    );
+  }
+  return JWT_SECRET;
+}
+
 export function signToken(payload: Omit<JWTPayload, "iat" | "exp" | "jti">): string {
-  return jwt.sign({ ...payload, jti: uuidv4() }, JWT_SECRET, {
+  return jwt.sign({ ...payload, jti: uuidv4() }, requireJwtSecret(), {
     expiresIn: JWT_EXPIRES_IN,
     algorithm: "HS256",
   });
 }
 
 export function verifyToken(token: string): JWTPayload {
-  const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
+  const decoded = jwt.verify(token, requireJwtSecret(), { algorithms: ["HS256"] });
   return JWTPayloadSchema.parse(decoded);
 }
 

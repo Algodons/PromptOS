@@ -187,7 +187,8 @@ export class AIRouterService {
 Return a JSON object with: optimizedPrompt (string), improvements (string[]), scoreImprovement (number -100 to 100), tokensReduced (number).`;
 
     const aiRequest: AIRequest = {
-      model: AIModel.GPT_4O_MINI,
+      // Honor targetModel when specified, otherwise fall back to the configured primary model
+      model: request.targetModel ?? this.config.primaryModel,
       messages: [
         {
           role: "user",

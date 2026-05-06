@@ -117,9 +117,13 @@ export class StripeService {
       }
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
+        // Retrieve userId from subscription metadata (set during checkout) rather than
+        // from customer_email which may be null and is not the internal user id.
+        const userId =
+          (invoice.subscription_details?.metadata?.["userId"] as string | undefined) ?? "";
         return {
           action: "payment_failed",
-          userId: invoice.customer_email ?? "",
+          userId,
           subscriptionId: invoice.subscription as string,
         };
       }

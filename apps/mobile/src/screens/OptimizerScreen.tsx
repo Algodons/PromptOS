@@ -29,9 +29,22 @@ export function OptimizerScreen() {
     if (!prompt.trim()) return;
     setLoading(true);
     try {
+      // Include the auth token when available; the API supports both authenticated
+      // and unauthenticated requests (unauthenticated get FREE tier limits).
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      try {
+        const { getItem } = await import("@react-native-async-storage/async-storage").then(
+          (m) => m.default
+        );
+        const token = await getItem("auth_token");
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+      } catch {
+        // AsyncStorage not available or no token; proceed without auth
+      }
+
       const res = await fetch(`${API_URL}/api/ai/optimize`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ prompt: prompt.trim() }),
       });
       if (!res.ok) throw new Error("Optimization failed");

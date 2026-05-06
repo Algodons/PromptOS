@@ -30,6 +30,24 @@ export class PluginEngine {
   private registry = new Map<string, PluginManifest>();
   private installations = new Map<string, PluginInstallation>();
   private sandboxes = new Map<string, PluginSandbox>();
+  /** Loaded plugin modules, keyed by pluginId. Registered via registerPluginModule(). */
+  private pluginModules = new Map<string, unknown>();
+
+  /**
+   * Register the executable module for a plugin.
+   * Must be called before any hook executions for the plugin will succeed.
+   * The module should export hook functions whose names match the hook keys
+   * defined in the plugin manifest (e.g. `onPromptCreate`, `onAIRequest`, etc.).
+   */
+  registerPluginModule(pluginId: string, module: unknown): void {
+    this.pluginModules.set(pluginId, module);
+    // Invalidate any cached sandbox so the new module is picked up
+    for (const [key] of this.sandboxes) {
+      if (key.includes(`:${pluginId}`)) {
+        this.sandboxes.delete(key);
+      }
+    }
+  }
 
   async installPlugin(
     userId: string,
@@ -162,7 +180,22 @@ export class PluginEngine {
     const key = `${installation.userId}:${installation.pluginId}`;
     let sandbox = this.sandboxes.get(key);
     if (!sandbox) {
-      sandbox = new InProcessSandbox({});
+      const module = this.pluginModules.get(installation.pluginId);
+      if (!module) {
+        // Plugin module has not been loaded yet — produce a clear error rather than
+        // silently succeeding with no-op hooks.
+        sandbox = {
+          execute: async (_ctx: PluginExecutionContext): Promise<unknown> => {
+            throw new Error(
+              `Plugin module for '${installation.pluginId}' is not loaded. ` +
+                `Call pluginEngine.registerPluginModule('${installation.pluginId}', module) ` +
+                `before executing plugin hooks.`
+            );
+          },
+        };
+      } else {
+        sandbox = new InProcessSandbox(module);
+      }
       this.sandboxes.set(key, sandbox);
     }
     return sandbox;
