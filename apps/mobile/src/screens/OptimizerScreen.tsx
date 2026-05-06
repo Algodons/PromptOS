@@ -21,7 +21,7 @@ interface OptimizationResult {
 }
 
 const API_URL =
-  (Constants.expoConfig?.extra as { EXPO_PUBLIC_API_URL?: string } | undefined)
+  (Constants.expoConfig?.extra as { EXPO_PUBLIC_API_URL?: string })
     ?.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
 export function OptimizerScreen() {
