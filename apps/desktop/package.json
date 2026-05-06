@@ -1,0 +1,55 @@
+{
+  "name": "@promptos/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PromptOS Desktop Application",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:next\" \"wait-on http://localhost:3000 && electron .\"",
+    "dev:next": "cd ../web && next dev",
+    "compile": "tsc --outDir dist",
+    "build": "pnpm compile && electron-builder --publish=never",
+    "build:mac": "pnpm compile && electron-builder --mac --publish=never",
+    "build:win": "pnpm compile && electron-builder --win --publish=never",
+    "build:linux": "pnpm compile && electron-builder --linux --publish=never",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.4"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^39.8.1",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.4.5",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "io.promptos.desktop",
+    "productName": "PromptOS",
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "files": ["dist/**/*", "assets/**/*"],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.icns",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis", "zip"],
+      "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/icon.png",
+      "category": "Utility"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
