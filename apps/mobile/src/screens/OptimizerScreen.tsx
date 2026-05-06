@@ -10,6 +10,8 @@ import {
   Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 
 interface OptimizationResult {
   optimizedPrompt: string;
@@ -18,7 +20,9 @@ interface OptimizationResult {
   tokensReduced: number;
 }
 
-const API_URL = process.env["EXPO_PUBLIC_API_URL"] ?? "http://localhost:3000";
+const API_URL =
+  (Constants.expoConfig?.extra as { EXPO_PUBLIC_API_URL?: string } | undefined)
+    ?.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
 export function OptimizerScreen() {
   const [prompt, setPrompt] = useState("");
@@ -33,10 +37,7 @@ export function OptimizerScreen() {
       // and unauthenticated requests (unauthenticated get FREE tier limits).
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       try {
-        const { getItem } = await import("@react-native-async-storage/async-storage").then(
-          (m) => m.default
-        );
-        const token = await getItem("auth_token");
+        const token = await AsyncStorage.getItem("auth_token");
         if (token) headers["Authorization"] = `Bearer ${token}`;
       } catch {
         // AsyncStorage not available or no token; proceed without auth
