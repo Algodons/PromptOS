@@ -4,6 +4,26 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref (branch/tag/SHA) to deploy
+        required: false
+        default: main
+        type: string
+      force_deploy:
+        description: Confirm manual production deployment
+        required: false
+        default: false
+        type: boolean
+      notify_on_failure:
+        description: Send optional webhook alert on failure
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  deployments: write
 
 concurrency:
   group: deploy-web-${{ github.ref }}
@@ -13,6 +33,7 @@ jobs:
   deploy:
     name: Deploy to Vercel
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || inputs.force_deploy == true
     permissions:
       contents: read
       deployments: write
@@ -22,29 +43,136 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+
+      - name: Detect runtime versions
+        id: versions
+        run: |
+          set -euo pipefail
+          if [[ -f .nvmrc ]]; then
+            NODE_VERSION="$(tr -d '[:space:]' < .nvmrc | sed 's/^v//')"
+          else
+            NODE_VERSION="20"
+          fi
+          PNPM_VERSION="$(grep -oE '"packageManager"[[:space:]]*:[[:space:]]*"pnpm@[^"]+"' package.json | sed -E 's/.*pnpm@([^"]+)".*/\1/' || true)"
+          PNPM_VERSION="${PNPM_VERSION:-8}"
+          echo "node_version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "pnpm_version=$PNPM_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ steps.versions.outputs.node_version }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
-          version: 8
+          version: ${{ steps.versions.outputs.pnpm_version }}
 
       - name: Install Vercel CLI
+        id: install-vercel
+        continue-on-error: true
         run: npm install -g vercel@latest
 
+      - name: Retry Install Vercel CLI
+        id: install-vercel-retry
+        if: steps.install-vercel.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          sleep 5
+          npm cache clean --force || true
+          npm install -g vercel@latest
+
       - name: Pull Vercel Environment Information
+        id: vercel-pull
+        continue-on-error: true
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
+      - name: Retry Pull Vercel Environment Information
+        id: vercel-pull-retry
+        if: steps.vercel-pull.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          sleep 5
+          vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
       - name: Build Project Artifacts
+        id: vercel-build
+        continue-on-error: true
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Retry Build Project Artifacts
+        id: vercel-build-retry
+        if: steps.vercel-build.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          sleep 10
+          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy to Vercel
         id: deploy
         run: |
-          URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
-          echo "url=$URL" >> $GITHUB_OUTPUT
-          echo "Deployed to: $URL"
+          set -euo pipefail
+          URL=""
+          attempts=(0 5 15)
+          for backoff in "${attempts[@]}"; do
+            if [[ "$backoff" != "0" ]]; then
+              sleep "$backoff"
+            fi
+            if URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}); then
+              echo "url=$URL" >> $GITHUB_OUTPUT
+              echo "Deployed to: $URL"
+              break
+            fi
+          done
+
+          if [[ -z "$URL" ]]; then
+            echo "Deployment failed after retries" >&2
+            exit 1
+          fi
+
+      - name: Deployment health check
+        run: |
+          set -euo pipefail
+          if [[ -z "${{ steps.deploy.outputs.url }}" ]]; then
+            echo "Deployment URL is empty" >&2
+            exit 1
+          fi
+          curl -fsSL --max-time 20 "${{ steps.deploy.outputs.url }}" >/dev/null
+
+      - name: Upload debug artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-web-debug-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            .vercel
+            **/pnpm-debug.log*
+
+      - name: Optional failure notification
+        if: failure() && (github.event_name != 'workflow_dispatch' || inputs.notify_on_failure == true) && secrets.CI_FAILURE_WEBHOOK != ''
+        run: |
+          set -euo pipefail
+          payload=$(cat <<EOF
+          {
+            "text": "❌ Deploy Web failed for ${{ github.repository }} on ${{ github.ref_name }}. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+          )
+          curl -fsSL -X POST -H "Content-Type: application/json" -d "$payload" "${{ secrets.CI_FAILURE_WEBHOOK }}"
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          {
+            echo "## Deploy Web Summary"
+            echo "- Install Vercel CLI attempt 1: ${{ steps.install-vercel.outcome }}"
+            echo "- Install Vercel CLI attempt 2: ${{ steps.install-vercel-retry.outcome || 'not-run' }}"
+            echo "- Vercel pull attempt 1: ${{ steps.vercel-pull.outcome }}"
+            echo "- Vercel pull attempt 2: ${{ steps.vercel-pull-retry.outcome || 'not-run' }}"
+            echo "- Vercel build attempt 1: ${{ steps.vercel-build.outcome }}"
+            echo "- Vercel build attempt 2: ${{ steps.vercel-build-retry.outcome || 'not-run' }}"
+            echo "- Deployment URL: ${{ steps.deploy.outputs.url || 'n/a' }}"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -5,30 +5,125 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      force_full_run:
+        description: Force all CI jobs to run
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run_lint_type_check: ${{ steps.compute.outputs.run_lint_type_check }}
+      run_build: ${{ steps.compute.outputs.run_build }}
+      changed_scope: ${{ steps.compute.outputs.changed_scope }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            lint_type_check:
+              - 'apps/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'turbo.json'
+              - '.github/workflows/ci.yml'
+            build:
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'turbo.json'
+              - '.github/workflows/ci.yml'
+
+      - name: Compute adaptive CI scope
+        id: compute
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE_FULL_RUN: ${{ inputs.force_full_run }}
+          LINT_CHANGED: ${{ steps.filter.outputs.lint_type_check }}
+          BUILD_CHANGED: ${{ steps.filter.outputs.build }}
+        run: |
+          set -euo pipefail
+          force="${FORCE_FULL_RUN:-false}"
+          lint_changed="${LINT_CHANGED:-true}"
+          build_changed="${BUILD_CHANGED:-true}"
+
+          if [[ "$EVENT_NAME" != "pull_request" || "$force" == "true" ]]; then
+            echo "run_lint_type_check=true" >> "$GITHUB_OUTPUT"
+            echo "run_build=true" >> "$GITHUB_OUTPUT"
+            echo "changed_scope=full" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$lint_changed" == "true" ]]; then
+            echo "run_lint_type_check=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_lint_type_check=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "$build_changed" == "true" ]]; then
+            echo "run_build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "changed_scope=changed-only" >> "$GITHUB_OUTPUT"
+
   lint-type-check:
     name: Lint & Type Check
     runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.run_lint_type_check == 'true'
     permissions:
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect runtime versions
+        id: versions
+        run: |
+          set -euo pipefail
+          if [[ -f .nvmrc ]]; then
+            NODE_VERSION="$(tr -d '[:space:]' < .nvmrc | sed 's/^v//')"
+          else
+            NODE_VERSION="20"
+          fi
+          PNPM_VERSION="$(grep -oE '"packageManager"[[:space:]]*:[[:space:]]*"pnpm@[^"]+"' package.json | sed -E 's/.*pnpm@([^"]+)".*/\1/' || true)"
+          PNPM_VERSION="${PNPM_VERSION:-8}"
+          echo "node_version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "pnpm_version=$PNPM_VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ steps.versions.outputs.node_version }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
-          version: 8
+          version: ${{ steps.versions.outputs.pnpm_version }}
 
       - name: Get pnpm store directory
         id: pnpm-cache
@@ -38,37 +133,135 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: ${{ runner.os }}-pnpm-
+          key: ${{ runner.os }}-pnpm-${{ steps.versions.outputs.node_version }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-${{ steps.versions.outputs.node_version }}-
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: ${{ runner.os }}-modules-${{ steps.versions.outputs.node_version }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-modules-${{ steps.versions.outputs.node_version }}-
 
       - name: Install dependencies
+        id: install-deps
+        continue-on-error: true
         run: pnpm install --frozen-lockfile
 
+      - name: Retry Install dependencies
+        id: install-deps-retry
+        if: steps.install-deps.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          sleep 5
+          pnpm install --frozen-lockfile
+
+      - name: Recover cache and retry Install dependencies
+        id: install-deps-recover
+        if: steps.install-deps.outcome == 'failure' && steps.install-deps-retry.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          rm -rf node_modules apps/*/node_modules packages/*/node_modules .turbo
+          pnpm store prune || true
+          sleep 15
+          pnpm install --frozen-lockfile
+
+      - name: Dependency health check
+        if: always()
+        run: |
+          node -v
+          pnpm -v
+          pnpm store status || true
+
       - name: Type check
+        id: type-check
+        continue-on-error: true
         run: pnpm turbo run type-check
 
+      - name: Retry Type check
+        id: type-check-retry
+        if: steps.type-check.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          sleep 5
+          pnpm turbo run type-check
+
       - name: Lint
+        id: lint
+        continue-on-error: true
         run: pnpm turbo run lint
+
+      - name: Retry Lint
+        id: lint-retry
+        if: steps.lint.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          sleep 5
+          pnpm turbo run lint
+
+      - name: Upload debug artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-lint-typecheck-debug-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            .turbo
+            **/pnpm-debug.log*
+
+      - name: CI summary
+        if: always()
+        run: |
+          {
+            echo "## Lint & Type Check Summary"
+            echo "- Scope: ${{ needs.detect-changes.outputs.changed_scope }}"
+            echo "- Install attempt 1: ${{ steps.install-deps.outcome }}"
+            echo "- Install attempt 2: ${{ steps.install-deps-retry.outcome || 'not-run' }}"
+            echo "- Install recovery attempt: ${{ steps.install-deps-recover.outcome || 'not-run' }}"
+            echo "- Type check attempt 1: ${{ steps.type-check.outcome }}"
+            echo "- Type check attempt 2: ${{ steps.type-check-retry.outcome || 'not-run' }}"
+            echo "- Lint attempt 1: ${{ steps.lint.outcome }}"
+            echo "- Lint attempt 2: ${{ steps.lint-retry.outcome || 'not-run' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: lint-type-check
+    needs: [detect-changes, lint-type-check]
+    if: needs.detect-changes.outputs.run_build == 'true' && needs.lint-type-check.result == 'success'
     permissions:
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect runtime versions
+        id: versions
+        run: |
+          set -euo pipefail
+          if [[ -f .nvmrc ]]; then
+            NODE_VERSION="$(tr -d '[:space:]' < .nvmrc | sed 's/^v//')"
+          else
+            NODE_VERSION="20"
+          fi
+          PNPM_VERSION="$(grep -oE '"packageManager"[[:space:]]*:[[:space:]]*"pnpm@[^"]+"' package.json | sed -E 's/.*pnpm@([^"]+)".*/\1/' || true)"
+          PNPM_VERSION="${PNPM_VERSION:-8}"
+          echo "node_version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "pnpm_version=$PNPM_VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ steps.versions.outputs.node_version }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
-          version: 8
+          version: ${{ steps.versions.outputs.pnpm_version }}
 
       - name: Get pnpm store directory
         id: pnpm-cache
@@ -78,21 +271,97 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: ${{ runner.os }}-pnpm-
+          key: ${{ runner.os }}-pnpm-${{ steps.versions.outputs.node_version }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-${{ steps.versions.outputs.node_version }}-
 
       - name: Cache Turbo
         uses: actions/cache@v4
         with:
           path: .turbo
-          key: ${{ runner.os }}-turbo-${{ github.sha }}
-          restore-keys: ${{ runner.os }}-turbo-
+          key: ${{ runner.os }}-turbo-${{ hashFiles('turbo.json', '**/package.json', '**/pnpm-lock.yaml') }}-${{ github.ref_name }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ hashFiles('turbo.json', '**/package.json', '**/pnpm-lock.yaml') }}-
+            ${{ runner.os }}-turbo-
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: ${{ runner.os }}-modules-${{ steps.versions.outputs.node_version }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-modules-${{ steps.versions.outputs.node_version }}-
 
       - name: Install dependencies
+        id: install-deps
+        continue-on-error: true
         run: pnpm install --frozen-lockfile
 
+      - name: Retry Install dependencies
+        id: install-deps-retry
+        if: steps.install-deps.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          sleep 5
+          pnpm install --frozen-lockfile
+
+      - name: Recover cache and retry Install dependencies
+        id: install-deps-recover
+        if: steps.install-deps.outcome == 'failure' && steps.install-deps-retry.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          rm -rf node_modules apps/*/node_modules packages/*/node_modules .turbo
+          pnpm store prune || true
+          sleep 15
+          pnpm install --frozen-lockfile
+
+      - name: Dependency health check
+        if: always()
+        run: |
+          node -v
+          pnpm -v
+          pnpm store status || true
+
       - name: Build packages
+        id: build-packages
+        continue-on-error: true
         run: pnpm turbo run build --filter=!@promptos/web --filter=!@promptos/desktop --filter=!@promptos/mobile
         env:
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+
+      - name: Retry Build packages
+        id: build-packages-retry
+        if: steps.build-packages.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          sleep 10
+          pnpm turbo run build --filter=!@promptos/web --filter=!@promptos/desktop --filter=!@promptos/mobile
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+
+      - name: Upload debug artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-build-debug-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            .turbo
+            **/pnpm-debug.log*
+
+      - name: CI summary
+        if: always()
+        run: |
+          {
+            echo "## Build Summary"
+            echo "- Scope: ${{ needs.detect-changes.outputs.changed_scope }}"
+            echo "- Install attempt 1: ${{ steps.install-deps.outcome }}"
+            echo "- Install attempt 2: ${{ steps.install-deps-retry.outcome || 'not-run' }}"
+            echo "- Install recovery attempt: ${{ steps.install-deps-recover.outcome || 'not-run' }}"
+            echo "- Build attempt 1: ${{ steps.build-packages.outcome }}"
+            echo "- Build attempt 2: ${{ steps.build-packages-retry.outcome || 'not-run' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
