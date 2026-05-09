@@ -63,7 +63,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ steps.versions.outputs.node_version }}
-          cache: npm
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
